@@ -11,3 +11,4 @@ class Book(Base):
     year = Column(Integer, nullable=True)
     isbn = Column(String, unique=True, nullable=True)
     copies = Column(Integer, nullable=False, default=1)
+    description = Column(String, nullable=True)
