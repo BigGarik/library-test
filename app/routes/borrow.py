@@ -135,3 +135,46 @@ async def return_book(
         status_code=status.HTTP_200_OK,
         headers={"Location": f"/borrow/{borrow_record.id}"}
     )
+
+
+@router.get("/{reader_id}",
+            response_model=list[BorrowRead],
+            status_code=status.HTTP_200_OK,
+            summary="Список взятых книг читателем")
+async def get_reader_borrows(
+        reader_id: int,
+        db: AsyncSession = Depends(get_db),
+        user=Depends(get_current_user)
+):
+    """Получает список всех книг, взятых читателем и ещё не возвращённых.
+
+    Требует аутентификации JWT. Возвращает записи о выдаче, где return_date равен NULL.
+
+    Args:
+        reader_id: Идентификатор читателя.
+
+    Raises:
+        HTTPException(404): Если читатель не найден.
+    """
+    # Проверка существования читателя
+    result = await db.execute(select(Reader).where(Reader.id == reader_id))
+    reader = result.scalar_one_or_none()
+    if not reader:
+        raise HTTPException(
+            status_code=404,
+            detail="Читатель не найден"
+        )
+
+    # Получение активных выдач
+    result = await db.execute(
+        select(BorrowedBook).where(
+            BorrowedBook.reader_id == reader_id,
+            BorrowedBook.return_date.is_(None)
+        )
+    )
+    borrows = result.scalars().all()
+
+    return JSONResponse(
+        content=[BorrowRead.model_validate(borrow).model_dump() for borrow in borrows],
+        status_code=status.HTTP_200_OK
+    )

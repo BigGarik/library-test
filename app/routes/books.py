@@ -79,14 +79,11 @@ async def create_book(
 
 @router.get("/", response_model=list[BookRead], summary="Получить список всех книг")
 async def get_books(
-    db: AsyncSession = Depends(get_db),
-    user=Depends(get_current_user)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Получение списка всех книг.
-
-    ## Требования:
-    - Пользователь должен быть аутентифицирован.
+    Доступен всем.
 
     ## Описание:
     Этот эндпоинт позволяет получить список всех книг, доступных в библиотеке.
