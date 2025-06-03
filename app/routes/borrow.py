@@ -78,3 +78,60 @@ async def borrow_book(
         status_code=status.HTTP_201_CREATED,
         headers={"Location": f"/borrow/{new_borrow.id}"}
     )
+
+
+@router.post("/return",
+             response_model=BorrowRead,
+             status_code=status.HTTP_200_OK,
+             summary="Возврат книги")
+async def return_book(
+        borrow: BorrowCreate,
+        db: AsyncSession = Depends(get_db),
+        user=Depends(get_current_user)
+):
+    """Возвращает книгу, взятую читателем.
+
+    Требует аутентификации JWT. Проверяет, что книга была выдана указанному читателю и ещё не возвращена.
+    Увеличивает количество экземпляров книги на 1 и устанавливает дату возврата в borrowed_books.
+    Возвращает обновлённую запись о выдаче.
+
+    Args:
+        borrow: Данные о возврате (book_id, reader_id).
+
+    Raises:
+        HTTPException(404): Если книга, читатель или запись о выдаче не найдены.
+        HTTPException(400): Если книга уже возвращена.
+    """
+
+    result = await db.execute(select(Book).where(Book.id == borrow.book_id))
+    book = result.scalar_one_or_none()
+    if not book:
+        raise HTTPException(status_code=404, detail="Книга не найдена")
+
+    result = await db.execute(select(Reader).where(Reader.id == borrow.reader_id))
+    reader = result.scalar_one_or_none()
+    if not reader:
+        raise HTTPException(status_code=404, detail="Читатель не найден")
+
+    result = await db.execute(
+        select(BorrowedBook).where(
+            BorrowedBook.book_id == borrow.book_id,
+            BorrowedBook.reader_id == borrow.reader_id,
+            BorrowedBook.return_date.is_(None)
+        )
+    )
+    borrow_record = result.scalar_one_or_none()
+    if not borrow_record:
+        raise HTTPException(status_code=404, detail="Запись о выдаче не найдена или книга уже возвращена")
+
+    borrow_record.return_date = datetime.now()
+    book.copies += 1
+    db.add(borrow_record)
+    db.add(book)
+    await db.commit()
+    await db.refresh(borrow_record)
+    return JSONResponse(
+        content=BorrowRead.model_validate(borrow_record).model_dump(),
+        status_code=status.HTTP_200_OK,
+        headers={"Location": f"/borrow/{borrow_record.id}"}
+    )
