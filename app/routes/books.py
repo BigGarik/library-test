@@ -182,6 +182,7 @@ async def update_book(
     for field, value in book_data.model_dump(exclude_unset=True).items():
         setattr(book, field, value)
 
+    db.add(book)
     await db.commit()
     await db.refresh(book)
     return book

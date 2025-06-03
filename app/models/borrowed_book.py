@@ -14,6 +14,5 @@ class BorrowedBook(Base):
     borrow_date = Column(DateTime, default=datetime.now, nullable=False)
     return_date = Column(DateTime, nullable=True)
 
-    # Опциональные связи для ORM
     book = relationship("Book", lazy="joined")
     reader = relationship("Reader", lazy="joined")
