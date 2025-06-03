@@ -61,7 +61,10 @@ async def create_book(
         result = await db.execute(select(Book).where(Book.isbn == book.isbn))
         existing = result.scalar_one_or_none()
         if existing:
-            raise HTTPException(status_code=400, detail="ISBN уже существует")
+            raise HTTPException(
+                status_code=400,
+                detail="ISBN уже существует"
+            )
 
     new_book = Book(**book.model_dump())
     db.add(new_book)
@@ -97,7 +100,10 @@ async def get_books(
     return result.scalars().all()
 
 
-@router.get("/{book_id}", response_model=BookRead, summary="Получить книгу по ID")
+@router.get("/{book_id}",
+            response_model=BookRead,
+            summary="Получить книгу по ID"
+            )
 async def get_book(
     book_id: int,
     db: AsyncSession = Depends(get_db),
@@ -127,7 +133,9 @@ async def get_book(
     return book
 
 
-@router.put("/{book_id}", response_model=BookRead, summary="Обновить книгу по ID")
+@router.put("/{book_id}",
+            response_model=BookRead,
+            summary="Обновить книгу по ID")
 async def update_book(
     book_id: int,
     book_data: BookUpdate,
@@ -164,8 +172,12 @@ async def update_book(
     """
     result = await db.execute(select(Book).where(Book.id == book_id))
     book = result.scalar_one_or_none()
+
     if not book:
-        raise HTTPException(status_code=404, detail="Книга не найдена")
+        raise HTTPException(
+            status_code=404,
+            detail="Книга не найдена"
+        )
 
     for field, value in book_data.model_dump(exclude_unset=True).items():
         setattr(book, field, value)
@@ -201,7 +213,9 @@ async def delete_book(
     result = await db.execute(select(Book).where(Book.id == book_id))
     book = result.scalar_one_or_none()
     if not book:
-        raise HTTPException(status_code=404, detail="Книга не найдена")
+        raise HTTPException(
+            status_code=404,
+            detail="Книга не найдена")
 
     await db.delete(book)
     await db.commit()
