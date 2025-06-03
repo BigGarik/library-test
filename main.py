@@ -1,8 +1,7 @@
 from fastapi import FastAPI
 
+from app.routes.routes import include_routers
+
 app = FastAPI()
 
-
-@app.get("/")
-def read_root():
-    return {"message": "Library API is up and running!"}
+include_routers(app)
