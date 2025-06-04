@@ -1,14 +1,18 @@
-from datetime import datetime
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
 from starlette.responses import JSONResponse
 
-from app.models.book import Book
-from app.models.borrowed_book import BorrowedBook
-from app.models.reader import Reader
 from app.schemas.borrow import BorrowCreate, BorrowRead
+from app.services.circulation import (
+    check_book_exists,
+    check_reader_exists,
+    check_book_availability,
+    check_borrow_limit,
+    create_borrow_record,
+    check_borrow_record,
+    return_borrowed_book,
+    get_active_borrows
+)
 from app.utils.dependencies import get_db, get_current_user
 
 router = APIRouter(prefix="/circulation", tags=["Выдача и возврат книг"])
@@ -17,8 +21,7 @@ router = APIRouter(prefix="/circulation", tags=["Выдача и возврат 
 @router.post("/borrow",
              response_model=BorrowRead,
              status_code=status.HTTP_201_CREATED,
-             summary="Выдача книги"
-             )
+             summary="Выдача книги")
 async def borrow_book(
         borrow: BorrowCreate,
         db: AsyncSession = Depends(get_db),
@@ -37,44 +40,13 @@ async def borrow_book(
         HTTPException(404): Если книга или читатель не найдены.
         HTTPException(400): Если нет доступных экземпляров или превышен лимит в 3 книги.
     """
-
-    result = await db.execute(select(Book).where(Book.id == borrow.book_id))
-    book = result.scalar_one_or_none()
-    if not book:
-        raise HTTPException(status_code=404, detail="Книга не найдена")
-
-
-    result = await db.execute(select(Reader).where(Reader.id == borrow.reader_id))
-    reader = result.scalar_one_or_none()
-    if not reader:
-        raise HTTPException(status_code=404, detail="Читатель не найден")
-
-
-    if book.copies < 1:
-        raise HTTPException(status_code=400, detail="Нет доступных экземпляров книги")
-
-    result = await db.execute(
-        select(BorrowedBook).where(
-            BorrowedBook.reader_id == borrow.reader_id,
-            BorrowedBook.return_date.is_(None)
-        )
-    )
-    active_borrows = len(result.scalars().all())
-    if active_borrows >= 3:
-        raise HTTPException(status_code=400, detail="Читатель не может взять более 3 книг одновременно")
-
-    new_borrow = BorrowedBook(
-        book_id=borrow.book_id,
-        reader_id=borrow.reader_id,
-        borrow_date=datetime.now()
-    )
-    book.copies -= 1
-    db.add(new_borrow)
-    db.add(book)
-    await db.commit()
-    await db.refresh(new_borrow)
+    book = await check_book_exists(db, borrow.book_id)
+    await check_reader_exists(db, borrow.reader_id)
+    await check_book_availability(book)
+    await check_borrow_limit(db, borrow.reader_id)
+    new_borrow = await create_borrow_record(db, borrow, book)
     return JSONResponse(
-        content=BorrowRead.model_validate(new_borrow).model_dump(),
+        content=new_borrow.model_dump(),
         status_code=status.HTTP_201_CREATED,
         headers={"Location": f"/borrow/{new_borrow.id}"}
     )
@@ -102,38 +74,14 @@ async def return_book(
         HTTPException(404): Если книга, читатель или запись о выдаче не найдены.
         HTTPException(400): Если книга уже возвращена.
     """
-
-    result = await db.execute(select(Book).where(Book.id == borrow.book_id))
-    book = result.scalar_one_or_none()
-    if not book:
-        raise HTTPException(status_code=404, detail="Книга не найдена")
-
-    result = await db.execute(select(Reader).where(Reader.id == borrow.reader_id))
-    reader = result.scalar_one_or_none()
-    if not reader:
-        raise HTTPException(status_code=404, detail="Читатель не найден")
-
-    result = await db.execute(
-        select(BorrowedBook).where(
-            BorrowedBook.book_id == borrow.book_id,
-            BorrowedBook.reader_id == borrow.reader_id,
-            BorrowedBook.return_date.is_(None)
-        )
-    )
-    borrow_record = result.scalar_one_or_none()
-    if not borrow_record:
-        raise HTTPException(status_code=404, detail="Запись о выдаче не найдена или книга уже возвращена")
-
-    borrow_record.return_date = datetime.now()
-    book.copies += 1
-    db.add(borrow_record)
-    db.add(book)
-    await db.commit()
-    await db.refresh(borrow_record)
+    book = await check_book_exists(db, borrow.book_id)
+    await check_reader_exists(db, borrow.reader_id)
+    borrow_record = await check_borrow_record(db, borrow.book_id, borrow.reader_id)
+    updated_borrow = await return_borrowed_book(db, borrow_record, book)
     return JSONResponse(
-        content=BorrowRead.model_validate(borrow_record).model_dump(),
+        content=updated_borrow.model_dump(),
         status_code=status.HTTP_200_OK,
-        headers={"Location": f"/borrow/{borrow_record.id}"}
+        headers={"Location": f"/borrow/{updated_borrow.id}"}
     )
 
 
@@ -156,25 +104,9 @@ async def get_reader_borrows(
     Raises:
         HTTPException(404): Если читатель не найден.
     """
-    # Проверка существования читателя
-    result = await db.execute(select(Reader).where(Reader.id == reader_id))
-    reader = result.scalar_one_or_none()
-    if not reader:
-        raise HTTPException(
-            status_code=404,
-            detail="Читатель не найден"
-        )
-
-    # Получение активных выдач
-    result = await db.execute(
-        select(BorrowedBook).where(
-            BorrowedBook.reader_id == reader_id,
-            BorrowedBook.return_date.is_(None)
-        )
-    )
-    borrows = result.scalars().all()
-
+    await check_reader_exists(db, reader_id)
+    borrows = await get_active_borrows(db, reader_id)
     return JSONResponse(
-        content=[BorrowRead.model_validate(borrow).model_dump() for borrow in borrows],
+        content=[borrow.model_dump() for borrow in borrows],
         status_code=status.HTTP_200_OK
     )
