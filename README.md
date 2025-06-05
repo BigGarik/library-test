@@ -44,12 +44,6 @@ uvicorn main:app --reload
 API доступен по адресу: `http://localhost:8000`
 Документация: `http://localhost:8000/docs`
 
-### 5. Регистрация первого пользователя
-```bash
-curl -X POST "http://localhost:8000/auth/register" \
-  -H "Content-Type: application/json" \
-  -d '{"email": "admin@library.com", "password": "password123"}'
-```
 
 ## Структура проекта
 
